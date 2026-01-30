@@ -1,0 +1,10 @@
+#!/bin/bash
+
+function buildlib_define() {
+    requireTask gradlebuild
+    addTaskTo build
+}
+
+function buildlib_run() {
+    :
+}

@@ -1,0 +1,8 @@
+# Project information
+group=usr.skyswimmer
+id=quicktools-utils
+name="quicktools-utils"
+version=a1.0
+
+# Sub-projects
+# None right now
