@@ -78,127 +78,182 @@ public class WrappedJsonElement extends JsonElement {
         }
     }
 
-    // FIXME: implement
+    public JsonElement resolve() {
+        // Resolve value
+        if (!delegate.isJsonPrimitive())
+            return delegate;
+
+        // Resolve
+        String pth = delegate.getAsString();
+        if (pth.startsWith("{") && pth.endsWith("}")) {
+            // Check
+            String key = pth.substring(1);
+            key = key.substring(0, key.length() - 1);
+            if (!key.contains("{") && !key.contains("}")) {
+                // Try to resolve
+                JsonElement resolved = processor.resolveVariable(key);
+                if (resolved != null)
+                    return resolved;
+            }
+        }
+
+        // Check
+        boolean updated = false;
+        String pthIndex = pth;
+        String pathStart = pth;
+        while (pathStart.contains("{")) {
+            // Parse key and substring
+            int start = pthIndex.indexOf("{");
+            int start2 = pathStart.indexOf("{");
+            String key = pth.substring(start);
+            String prefix = pth.substring(0, start);
+            if (!key.contains("}"))
+                break;
+            String suffix = key.substring(key.indexOf("}") + 1);
+            pathStart = pathStart.substring(start2 + 1);
+            pathStart = pathStart.substring(pathStart.indexOf("}") + 1);
+            key = key.substring(1, key.indexOf("}"));
+
+            // Prepare value
+            String value = "";
+
+            // Resolve
+            JsonElement resolved = processor.resolveVariable(key);
+            if (resolved != null) {
+                // Handle result
+
+                // Check wrapped, and if needed, re-resolve
+                if (resolved instanceof WrappedJsonElement) {
+                    resolved = ((WrappedJsonElement) resolved).resolve();
+                }
+
+                // Check
+                if (resolved.isJsonPrimitive())
+                    value = resolved.getAsString();
+                else
+                    value = resolved.toString();
+
+                // Update
+                pth = prefix + value + suffix;
+            }
+
+            // Fake
+            String valStripped = "#" + key + "#";
+
+            // Update index
+            pthIndex = prefix + valStripped + suffix;
+            updated = true;
+        }
+
+        // Return
+        if (updated)
+            return new JsonPrimitive(pth);
+        return delegate;
+    }
 
     @Override
     public BigDecimal getAsBigDecimal() {
-        // TODO Auto-generated method stub
-        return delegate.getAsBigDecimal();
+        return resolve().getAsBigDecimal();
     }
 
     @Override
     public BigInteger getAsBigInteger() {
-        // TODO Auto-generated method stub
-        return delegate.getAsBigInteger();
+        return resolve().getAsBigInteger();
     }
 
     @Override
     public boolean getAsBoolean() {
-        // TODO Auto-generated method stub
-        return delegate.getAsBoolean();
+        return resolve().getAsBoolean();
     }
 
     @Override
     public byte getAsByte() {
-        // TODO Auto-generated method stub
-        return delegate.getAsByte();
+        return resolve().getAsByte();
     }
 
     @Override
     public char getAsCharacter() {
-        // TODO Auto-generated method stub
-        return delegate.getAsCharacter();
+        return resolve().getAsCharacter();
     }
 
     @Override
     public double getAsDouble() {
-        // TODO Auto-generated method stub
-        return delegate.getAsDouble();
+        return resolve().getAsDouble();
     }
 
     @Override
     public float getAsFloat() {
-        // TODO Auto-generated method stub
-        return delegate.getAsFloat();
+        return resolve().getAsFloat();
     }
 
     @Override
     public int getAsInt() {
-        // TODO Auto-generated method stub
-        return delegate.getAsInt();
+        return resolve().getAsInt();
     }
 
     @Override
     public JsonArray getAsJsonArray() {
-        // TODO Auto-generated method stub
-        return delegate.getAsJsonArray();
+        return resolve().getAsJsonArray();
     }
 
     @Override
     public JsonNull getAsJsonNull() {
-        // TODO Auto-generated method stub
-        return delegate.getAsJsonNull();
+        return resolve().getAsJsonNull();
     }
 
     @Override
     public JsonObject getAsJsonObject() {
-        // TODO Auto-generated method stub
-        return delegate.getAsJsonObject();
+        return resolve().getAsJsonObject();
     }
 
     @Override
     public JsonPrimitive getAsJsonPrimitive() {
-        // TODO Auto-generated method stub
-        return delegate.getAsJsonPrimitive();
+        return resolve().getAsJsonPrimitive();
     }
 
     @Override
     public long getAsLong() {
-        // TODO Auto-generated method stub
-        return delegate.getAsLong();
+        return resolve().getAsLong();
     }
 
     @Override
     public Number getAsNumber() {
-        // TODO Auto-generated method stub
-        return delegate.getAsNumber();
+        return resolve().getAsNumber();
     }
 
     @Override
     public short getAsShort() {
-        // TODO Auto-generated method stub
-        return delegate.getAsShort();
+        return resolve().getAsShort();
     }
 
     @Override
     public String getAsString() {
-        // TODO Auto-generated method stub
-        return delegate.getAsString();
+        return resolve().getAsString();
     }
 
     @Override
     public boolean isJsonArray() {
-        return delegate.isJsonArray();
+        return resolve().isJsonArray();
     }
 
     @Override
     public boolean isJsonNull() {
-        return delegate.isJsonNull();
+        return resolve().isJsonNull();
     }
 
     @Override
     public boolean isJsonObject() {
-        return delegate.isJsonObject();
+        return resolve().isJsonObject();
     }
 
     @Override
     public boolean isJsonPrimitive() {
-        return delegate.isJsonPrimitive();
+        return resolve().isJsonPrimitive();
     }
 
     @Override
     public String toString() {
         return super.toString();
     }
-    
+
 }
