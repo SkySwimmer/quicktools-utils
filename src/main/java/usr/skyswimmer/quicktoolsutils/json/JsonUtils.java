@@ -181,4 +181,48 @@ public class JsonUtils {
 		return ele.getAsJsonArray();
 	}
 
+	public static void mergeObject(JsonObject source, JsonObject target) {
+		mergeObject(source, target, false);
+	}
+
+	public static void mergeObject(JsonObject source, JsonObject target, boolean doMergeArray) {
+		// Merge each entry
+		for (String key : source.keySet()) {
+			if (source.get(key).isJsonObject()) {
+				JsonObject chT = createOrGetJsonObject(target, key);
+				mergeObject(source.get(key).getAsJsonObject(), chT);
+			} else if (source.get(key).isJsonArray()) {
+				JsonArray chT = createOrGetJsonArray(target, key);
+				if (doMergeArray)
+					mergeArray(source.get(key).getAsJsonArray(), chT, doMergeArray);
+				else
+					target.add(key, source.get(key));
+			} else
+				target.add(key, source.get(key));
+		}
+	}
+
+	public static void mergeArray(JsonArray source, JsonArray target, boolean doMergeArray) {
+		// Merge each entry
+		for (JsonElement ele : source) {
+			target.add(ele);
+		}
+	}
+
+	public static JsonArray createOrGetJsonArray(JsonObject obj, String name) {
+		if (obj.has(name))
+			return obj.get(name).getAsJsonArray();
+		JsonArray res = new JsonArray();
+		obj.add(name, res);
+		return res;
+	}
+
+	public static JsonObject createOrGetJsonObject(JsonObject obj, String name) {
+		if (obj.has(name))
+			return obj.get(name).getAsJsonObject();
+		JsonObject res = new JsonObject();
+		obj.add(name, res);
+		return res;
+	}
+
 }
