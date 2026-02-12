@@ -106,14 +106,14 @@ public class JsonVariablesProcessor {
         // Wrap objects and arrays
         if (element.isJsonObject()) {
             // Create wrapped
-            // FIXME: getAsJsonPrimitive will crash
+            // FIXME: getAsJsonPrimitive(name) will crash
             JsonObject unwrapped = element.getAsJsonObject();
             JsonObject wrappedObj = new JsonObject();
             for (String key : unwrapped.keySet()) {
                 JsonElement ele = unwrapped.get(key);
                 wrappedObj.add(key, wrapElement(ele));
             }
-            return wrappedObj;
+            element = wrappedObj;
         } else if (element.isJsonArray()) {
             // Create wrapped
             JsonArray unwrapped = element.getAsJsonArray();
@@ -121,7 +121,7 @@ public class JsonVariablesProcessor {
             for (JsonElement ele : unwrapped) {
                 wrappedObj.add(wrapElement(ele));
             }
-            return wrappedObj;
+            element = wrappedObj;
         }
 
         // Return wrapepd
