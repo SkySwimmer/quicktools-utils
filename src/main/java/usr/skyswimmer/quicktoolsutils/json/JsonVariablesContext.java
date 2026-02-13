@@ -1,5 +1,6 @@
 package usr.skyswimmer.quicktoolsutils.json;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 
@@ -15,22 +16,32 @@ public class JsonVariablesContext {
         public String keyPath;
 
         public VariableContainer container; // Variable
-
-        public VariableContainerPointer parent; // Parent pointer
         public JsonElement parentValue; // The object that holds this pointer's content
     }
 
     private static class VariableContainer {
         public String name;
 
-        public JsonElement baseValue;
+        public boolean wrap;
+        public JsonElement baseValueElement;
         public HashMap<String, VariableContainer> children = new LinkedHashMap<String, VariableContainer>();
 
         public HashMap<JsonVariablesContext, VariableContainerPointer> holdingContexts = new LinkedHashMap<JsonVariablesContext, VariableContainerPointer>();
 
-        public void assign(JsonElement element) {
+        public JsonElement resolve(JsonVariablesProcessor proc) {
+            if (!wrap)
+                return baseValueElement;
+            return proc.wrapElement(baseValueElement);
+        }
+
+        public void assign(JsonElement element, boolean process) {
             // Assign
-            baseValue = element;
+            wrap = process;
+            if (wrap) {
+                // Unwrap
+                element = WrappedJsonElement.unwrap(element);
+            }
+            baseValueElement = element;
 
             // Update context parent element to match new value
             for (JsonVariablesContext ctx : holdingContexts.keySet()) {
@@ -47,26 +58,47 @@ public class JsonVariablesContext {
     private HashMap<String, VariableContainerPointer> allContainers = new LinkedHashMap<String, VariableContainerPointer>();
     private HashMap<String, VariableContainerPointer> rootContainers = new LinkedHashMap<String, VariableContainerPointer>();
 
+    private HashMap<VariableContainerPointer, JsonVariablesContext> targetPointers = new HashMap<VariableContainerPointer, JsonVariablesContext>();
+    private ArrayList<JsonVariablesContext> targetContexts = new ArrayList<JsonVariablesContext>();
+
     JsonVariablesContext(JsonVariablesProcessor processor) {
         this.processor = processor;
     }
 
-    // FIXME: current concept doesnt deal with cases where eg. a new root element is
-    // made, maybe allow specific contexts/pointers to be added to a base context
-    // which are called whenever new root elements are made
-
     private void attachVariable(VariableContainerPointer container) {
         // Add container
         allContainers.put(container.keyPath.toLowerCase(), container);
-        if (!container.keyPath.contains("."))
+        if (!container.keyPath.contains(".")) {
+            // Add root container
             rootContainers.put(container.keyPath.toLowerCase(), container);
+
+            // Add to attached contexts
+            for (JsonVariablesContext ctx : targetContexts) {
+                VariableContainerPointer ptr = new VariableContainerPointer();
+                ptr.container = container.container;
+                ptr.keyPath = container.keyPath;
+                ptr.localName = container.localName;
+                ctx.attachVariable(ptr);
+            }
+
+            // Add to attached variables
+            for (VariableContainerPointer ptr : targetPointers.keySet()) {
+                JsonVariablesContext ctx = targetPointers.get(ptr);
+                VariableContainerPointer ptr2 = new VariableContainerPointer();
+                ptr2.container = container.container;
+                ptr2.keyPath = ptr.keyPath + "." + container.keyPath;
+                ptr2.localName = container.localName;
+                ptr2.parentValue = ptr.container.baseValueElement;
+                ctx.attachVariable(ptr2);
+            }
+        }
 
         // Add context to container
         container.container.holdingContexts.put(this, container);
 
         // Add to local parent object if needed
         if (container.parentValue != null && container.parentValue.isJsonObject())
-            container.parentValue.getAsJsonObject().add(container.localName, container.container.baseValue);
+            container.parentValue.getAsJsonObject().add(container.localName, container.container.resolve(processor));
 
         // Go through children and add each child variable to local context
         for (String childKey : container.container.children.keySet()) {
@@ -77,10 +109,10 @@ public class JsonVariablesContext {
                 // Create pointer
                 VariableContainerPointer pointer = new VariableContainerPointer();
                 pointer.container = child;
-                pointer.parent = container;
                 pointer.localName = child.name;
                 pointer.keyPath = container.keyPath + "." + child.name;
-                pointer.parentValue = container.container.baseValue; // Set to the parent of the current child object
+                pointer.parentValue = container.container.baseValueElement; // Set to the parent of the current child
+                                                                            // object
 
                 // Attach
                 attachVariable(pointer);
@@ -91,8 +123,27 @@ public class JsonVariablesContext {
     private void detachVariable(VariableContainerPointer container) {
         // Remove container
         allContainers.remove(container.keyPath.toLowerCase());
-        if (!container.keyPath.contains("."))
+        if (!container.keyPath.contains(".")) {
+            // Remove root container
             rootContainers.remove(container.keyPath.toLowerCase());
+
+            // Remove from attached contexts
+            for (JsonVariablesContext ctx : targetContexts) {
+                // Get variable and remove
+                VariableContainerPointer ptr = ctx.allContainers.get(container.keyPath.toLowerCase());
+                if (ptr != null)
+                    ctx.detachVariable(ptr);
+            }
+
+            // Remove from attached variables
+            for (VariableContainerPointer ptr : targetPointers.keySet()) {
+                JsonVariablesContext ctx = targetPointers.get(ptr);
+                VariableContainerPointer tar = ctx.allContainers
+                        .get((ptr.keyPath + "." + container.localName).toLowerCase());
+                if (tar != null)
+                    ctx.detachVariable(tar);
+            }
+        }
 
         // Remove from parent element
         if (container.parentValue != null && container.parentValue.isJsonObject()
@@ -117,8 +168,6 @@ public class JsonVariablesContext {
         container.container.holdingContexts.remove(this);
     }
 
-    // FIXME: rework class
-
     /**
      * Removes variables
      * 
@@ -137,7 +186,7 @@ public class JsonVariablesContext {
         detachVariable(cont);
 
         // Return
-        return cont.container.baseValue;
+        return cont.container.resolve(processor);
     }
 
     /**
@@ -160,7 +209,7 @@ public class JsonVariablesContext {
         VariableContainerPointer container = allContainers.get(key.toLowerCase());
         if (container == null)
             return null;
-        return container.container.baseValue;
+        return container.container.resolve(processor);
     }
 
     /**
@@ -170,13 +219,32 @@ public class JsonVariablesContext {
      * @return Array of fully-qualified child variable keys or an empty array
      */
     public String[] getChildVariables(String key) {
+        return getChildVariables(key, false);
+    }
+
+    /**
+     * Retrieves child variable keys of a specific variable
+     * 
+     * @param key       Variable key
+     * @param recursive True to recursively include all children of the given key
+     *                  and their children, false to only retrieve top-level child
+     *                  keys
+     * @return Array of fully-qualified child variable keys or an empty array
+     */
+    public String[] getChildVariables(String key, boolean recursive) {
         if (!hasVariable(key))
             return new String[0];
-        // return allContainers.get(key.toLowerCase()).children.values().stream().map(t
-        // -> t.key).toArray(t -> new String[t]);
-
-        // FIXME: reimplement
-        return null;
+        VariableContainerPointer ptr = allContainers.get(key.toLowerCase());
+        ArrayList<String> childKeys = new ArrayList<String>();
+        for (VariableContainer child : ptr.container.children.values()) {
+            childKeys.add(ptr.keyPath + "." + child.name);
+            if (recursive) {
+                // Add children
+                for (String ch : getChildVariables(ptr.keyPath + "." + child.name, true))
+                    childKeys.add(ch);
+            }
+        }
+        return childKeys.toArray(t -> new String[t]);
     }
 
     /**
@@ -188,11 +256,12 @@ public class JsonVariablesContext {
     public String[] getChildVariableNames(String key) {
         if (!hasVariable(key))
             return new String[0];
-        // return allContainers.get(key.toLowerCase()).children.values().stream().map(t
-        // -> t.name).toArray(t -> new String[t]);
-
-        // FIXME: reimplement
-        return null;
+        VariableContainerPointer ptr = allContainers.get(key.toLowerCase());
+        ArrayList<String> childKeys = new ArrayList<String>();
+        for (VariableContainer child : ptr.container.children.values()) {
+            childKeys.add(child.name);
+        }
+        return childKeys.toArray(t -> new String[t]);
     }
 
     /**
@@ -201,11 +270,7 @@ public class JsonVariablesContext {
      * @return Array of variable strings
      */
     public String[] getVariables() {
-        // return allContainers.values().stream().map(t -> t.key).toArray(t -> new
-        // String[t]);
-
-        // FIXME: reimplement
-        return null;
+        return allContainers.values().stream().map(t -> t.keyPath).toArray(t -> new String[t]);
     }
 
     /**
@@ -227,70 +292,196 @@ public class JsonVariablesContext {
      *                expanded), false to leave it raw
      */
     public void assignVariable(String key, JsonElement value, boolean process) {
-        // Process variable value
-        if (process) {
-            // Process variable, expand if needed
-            value = processor.wrapElement(value);
+        String base = "";
+        if (key.contains(".")) {
+            base = key.substring(0, key.lastIndexOf("."));
+            key = key.substring(key.lastIndexOf(".") + 1);
         }
+        assignVariable(base, key, value, process);
+    }
 
+    /**
+     * Assigns JSON variables (defaults to process = true)
+     * 
+     * @param baseKey Variable parent key
+     * @param name    Variable name
+     * @param value   Variable value
+     */
+    public void assignVariable(String baseKey, String name, JsonElement value) {
+        assignVariable(baseKey, name, value, true);
+    }
+
+    /**
+     * Assigns JSON variables
+     * 
+     * @param baseKey Variable parent key
+     * @param name    Variable name
+     * @param value   Variable value
+     * @param process True if the variable should be processed (scanned in and
+     *                expanded), false to leave it raw
+     */
+    public void assignVariable(String baseKey, String name, JsonElement value, boolean process) {
         // Check existing
-        if (allContainers.containsKey(key.toLowerCase())) {
+        String fullKey = baseKey;
+        if (!fullKey.isEmpty())
+            fullKey += ".";
+        fullKey += name;
+        if (allContainers.containsKey(fullKey.toLowerCase())) {
             // Found existing
-            VariableContainerPointer ptr = allContainers.get(key.toLowerCase());
+            VariableContainerPointer ptr = allContainers.get(fullKey.toLowerCase());
 
             // Update
-            ptr.container.assign(value);
+            ptr.container.assign(value, process);
         } else {
             // Create containers
-            String path = "";
+            VariableContainerPointer container = null;
             VariableContainerPointer parent = null;
-            for (String part : key.split("\\.")) {
-                // Get path
-                String pth = path;
-                if (!pth.isEmpty())
-                    pth += ".";
-                pth += part;
-                path = pth;
+            if (!baseKey.isEmpty()) {
+                // Get key
+                parent = allContainers.get(baseKey.toLowerCase());
+                if (parent == null) {
+                    // Find any parent that exists
+                    String keyName = "";
+                    String keyRemainer = "";
+                    String keyParent = baseKey;
+                    VariableContainerPointer ptrParent = allContainers.get(keyParent);
+                    while (ptrParent == null) {
+                        if (!keyParent.contains(".")) {
+                            // End
+                            if (!keyName.isEmpty())
+                                keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                            keyName = keyParent;
+                            keyParent = "";
+                            ptrParent = allContainers.get(keyParent);
+                            break;
+                        }
+                        if (!keyName.isEmpty())
+                            keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                        keyName = keyParent.substring(keyParent.lastIndexOf(".") + 1);
+                        keyParent = keyParent.substring(0, keyParent.lastIndexOf("."));
+                        ptrParent = allContainers.get(keyParent);
+                    }
 
-                // Create or get container
-                VariableContainerPointer container;
-                if (!allContainers.containsKey(pth.toLowerCase())) {
-                    // Create
-                    container = new VariableContainerPointer();
+                    // Create key in parent
+                    String pthL = keyParent;
+                    if (!pthL.isEmpty())
+                        pthL += ".";
+                    pthL += keyName;
+                    if (!allContainers.containsKey(pthL.toLowerCase())) {
+                        // Create
+                        container = new VariableContainerPointer();
 
-                    // Create variable
-                    VariableContainer var = new VariableContainer();
-                    var.baseValue = new JsonObject();
-                    var.name = part;
+                        // Create variable
+                        VariableContainer var = new VariableContainer();
+                        var.baseValueElement = new JsonObject();
+                        var.name = keyName;
 
-                    // Assign
-                    container.container = var;
-                    container.localName = part;
-                    container.keyPath = pth;
-                    container.parent = parent;
-                    if (parent != null)
-                        container.parentValue = parent.container.baseValue;
+                        // Assign
+                        container.container = var;
+                        container.localName = keyName;
+                        container.keyPath = pthL;
+                        if (ptrParent != null)
+                            container.parentValue = ptrParent.container.baseValueElement;
 
-                    // Add to parent
-                    if (parent != null)
-                        parent.container.children.put(part, var);
+                        // Add to parent
+                        if (ptrParent != null)
+                            ptrParent.container.children.put(keyName, var);
 
-                    // Attach
-                    attachVariable(container);
-                } else {
-                    // Get
-                    container = allContainers.get(pth.toLowerCase());
-                    pth = container.keyPath;
-                    path = pth;
+                        // Attach
+                        attachVariable(container);
+                    } else {
+                        // Get
+                        container = allContainers.get(pthL.toLowerCase());
+                        pthL = container.keyPath;
+                    }
+
+                    // Update parent
+                    parent = container;
+
+                    // Check remaining
+                    if (!keyRemainer.isEmpty()) {
+                        // Additional keys need to be made
+
+                        // Go through keys
+                        String path = parent.keyPath;
+                        for (String part : keyRemainer.split("\\.")) {
+                            // Get path
+                            String pth = path;
+                            if (!pth.isEmpty())
+                                pth += ".";
+                            pth += part;
+                            path = pth;
+
+                            // Create or get container
+                            container = null;
+                            if (!allContainers.containsKey(pth.toLowerCase())) {
+                                // Create
+                                container = new VariableContainerPointer();
+
+                                // Create variable
+                                VariableContainer var = new VariableContainer();
+                                var.baseValueElement = new JsonObject();
+                                var.name = part;
+
+                                // Assign
+                                container.container = var;
+                                container.localName = part;
+                                container.keyPath = pth;
+                                if (parent != null)
+                                    container.parentValue = parent.container.baseValueElement;
+
+                                // Add to parent
+                                if (parent != null)
+                                    parent.container.children.put(part, var);
+
+                                // Attach
+                                attachVariable(container);
+                            } else {
+                                // Get
+                                container = allContainers.get(pth.toLowerCase());
+                                pth = container.keyPath;
+                                path = pth;
+                            }
+
+                            // Update parent
+                            parent = container;
+                        }
+                    }
                 }
+            }
 
-                // Update parent
-                parent = container;
+            // Create or get container
+            container = null;
+            if (!allContainers.containsKey(fullKey.toLowerCase())) {
+                // Create
+                container = new VariableContainerPointer();
+
+                // Create variable
+                VariableContainer var = new VariableContainer();
+                var.baseValueElement = new JsonObject();
+                var.name = name;
+
+                // Assign
+                container.container = var;
+                container.localName = name;
+                container.keyPath = fullKey;
+                if (parent != null)
+                    container.parentValue = parent.container.baseValueElement;
+
+                // Add to parent
+                if (parent != null)
+                    parent.container.children.put(name, var);
+
+                // Attach
+                attachVariable(container);
+            } else {
+                // Get
+                container = allContainers.get(fullKey.toLowerCase());
+                fullKey = container.keyPath;
             }
 
             // Assign value
-            if (parent != null)
-                parent.container.assign(value);
+            container.container.assign(value, process);
         }
     }
 
@@ -311,26 +502,170 @@ public class JsonVariablesContext {
      */
     public void importContext(String baseKey, JsonVariablesContext context) {
         // Prepare key
-        // if (baseKey.endsWith("."))
-        // baseKey = baseKey.substring(0, baseKey.length() - 1);
+        if (baseKey.endsWith("."))
+            baseKey = baseKey.substring(0, baseKey.length() - 1);
+        if (baseKey.isEmpty()) {
+            // Attach to root
+            if (context.targetContexts.contains(this))
+                return;
 
-        // // Go through vars
-        // for (String var : context.getVariables()) {
-        // String key = baseKey;
-        // if (!key.isEmpty())
-        // key += ".";
-        // key += var;
-        // JsonElement ele = context.getVariable(var);
-        // if (ele instanceof WrappedJsonElement && ((WrappedJsonElement)
-        // ele).getProcessor() != processor) {
-        // ele = ((WrappedJsonElement) ele).unwrap();
-        // ele = new WrappedJsonElement(ele, processor);
-        // }
-        // assignVariable(key, ele, false);
-        // }
+            // Add to target
+            context.targetContexts.add(this);
 
-        // FIXME: reimplement
-        return;
+            // Copy root pointers
+            for (VariableContainerPointer root : context.rootContainers.values()) {
+                VariableContainerPointer ptr = new VariableContainerPointer();
+                ptr.container = root.container;
+                ptr.keyPath = root.keyPath;
+                ptr.localName = root.localName;
+                attachVariable(ptr);
+            }
+        } else {
+            // Attach to sub-context
+
+            // Check existing
+            VariableContainerPointer cont = null;
+            if (allContainers.containsKey(baseKey.toLowerCase())) {
+                // Found existing
+                VariableContainerPointer ptr = allContainers.get(baseKey.toLowerCase());
+                cont = ptr;
+            } else {
+                // Create containers
+                VariableContainerPointer container = null;
+                VariableContainerPointer parent = null;
+                if (!baseKey.isEmpty()) {
+                    // Get key
+                    parent = allContainers.get(baseKey.toLowerCase());
+                    if (parent == null) {
+                        // Find any parent that exists
+                        String keyName = "";
+                        String keyRemainer = "";
+                        String keyParent = baseKey;
+                        VariableContainerPointer ptrParent = allContainers.get(keyParent);
+                        while (ptrParent == null) {
+                            if (!keyParent.contains(".")) {
+                                // End
+                                if (!keyName.isEmpty())
+                                    keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                                keyName = keyParent;
+                                keyParent = "";
+                                ptrParent = allContainers.get(keyParent);
+                                break;
+                            }
+                            if (!keyName.isEmpty())
+                                keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                            keyName = keyParent.substring(keyParent.lastIndexOf(".") + 1);
+                            keyParent = keyParent.substring(0, keyParent.lastIndexOf("."));
+                            ptrParent = allContainers.get(keyParent);
+                        }
+
+                        // Create key in parent
+                        String pthL = keyParent;
+                        if (!pthL.isEmpty())
+                            pthL += ".";
+                        pthL += keyName;
+                        if (!allContainers.containsKey(pthL.toLowerCase())) {
+                            // Create
+                            container = new VariableContainerPointer();
+
+                            // Create variable
+                            VariableContainer var = new VariableContainer();
+                            var.baseValueElement = new JsonObject();
+                            var.name = keyName;
+
+                            // Assign
+                            container.container = var;
+                            container.localName = keyName;
+                            container.keyPath = pthL;
+                            if (ptrParent != null)
+                                container.parentValue = ptrParent.container.baseValueElement;
+
+                            // Add to parent
+                            if (ptrParent != null)
+                                ptrParent.container.children.put(keyName, var);
+
+                            // Attach
+                            attachVariable(container);
+                        } else {
+                            // Get
+                            container = allContainers.get(pthL.toLowerCase());
+                            pthL = container.keyPath;
+                        }
+
+                        // Update parent
+                        parent = container;
+
+                        // Check remaining
+                        if (!keyRemainer.isEmpty()) {
+                            // Additional keys need to be made
+
+                            // Go through keys
+                            String path = parent.keyPath;
+                            for (String part : keyRemainer.split("\\.")) {
+                                // Get path
+                                String pth = path;
+                                if (!pth.isEmpty())
+                                    pth += ".";
+                                pth += part;
+                                path = pth;
+
+                                // Create or get container
+                                container = null;
+                                if (!allContainers.containsKey(pth.toLowerCase())) {
+                                    // Create
+                                    container = new VariableContainerPointer();
+
+                                    // Create variable
+                                    VariableContainer var = new VariableContainer();
+                                    var.baseValueElement = new JsonObject();
+                                    var.name = part;
+
+                                    // Assign
+                                    container.container = var;
+                                    container.localName = part;
+                                    container.keyPath = pth;
+                                    if (parent != null)
+                                        container.parentValue = parent.container.baseValueElement;
+
+                                    // Add to parent
+                                    if (parent != null)
+                                        parent.container.children.put(part, var);
+
+                                    // Attach
+                                    attachVariable(container);
+                                } else {
+                                    // Get
+                                    container = allContainers.get(pth.toLowerCase());
+                                    pth = container.keyPath;
+                                    path = pth;
+                                }
+
+                                // Update parent
+                                parent = container;
+                            }
+                        }
+                    }
+                }
+
+                // Assign value
+                if (parent != null)
+                    cont = parent;
+            }
+            if (cont != null) {
+                // Add to target
+                context.targetPointers.put(cont, this);
+
+                // Copy root pointers
+                for (VariableContainerPointer root : context.rootContainers.values()) {
+                    VariableContainerPointer ptr = new VariableContainerPointer();
+                    ptr.container = root.container;
+                    ptr.keyPath = baseKey + "." + root.keyPath;
+                    ptr.localName = root.localName;
+                    ptr.parentValue = cont.container.baseValueElement;
+                    attachVariable(ptr);
+                }
+            }
+        }
     }
 
     /**
@@ -349,30 +684,49 @@ public class JsonVariablesContext {
      * @param object  Json object to import
      */
     public void importObject(String baseKey, JsonObject object) {
+        importObject(baseKey, object, true);
+    }
+
+    /**
+     * Imports json objects as variable values
+     * 
+     * @param baseKey Base element key
+     * @param object  Json object to import
+     * @param process True to wrap wrap/unwrap the object being imported in variable
+     *                resolution, false to leave raw
+     */
+    public void importObject(String baseKey, JsonObject object, boolean process) {
         // Handle keys
         if (baseKey.endsWith("."))
             baseKey = baseKey.substring(0, baseKey.length() - 1);
 
         // Import object
-        for (String keyPart : object.keySet()) {
-            String key = baseKey;
-            if (!key.isEmpty())
-                key += ".";
-            key += keyPart;
-
+        String[] keys = object.keySet().toArray(t -> new String[t]);
+        for (String keyPart : keys) {
             // Get element
             JsonElement ele = object.get(keyPart);
 
             // Assign
-            if (!ele.isJsonObject())
-                assignVariable(key, object.get(keyPart));
+            assignVariable(baseKey, keyPart, ele, process);
 
             // Import if needed
             if (ele.isJsonObject()) {
                 // Import child object
                 JsonObject obj = ele.getAsJsonObject();
-                importObject(key, obj);
+                importObject((baseKey.isEmpty() ? "" : baseKey + ".") + keyPart, obj);
             }
         }
+    }
+
+    /**
+     * Duplicates the current variable context
+     * 
+     * @param proc Variable processor to use
+     * @return Duplicated JsonVariablesContext instance
+     */
+    public JsonVariablesContext duplicate(JsonVariablesProcessor proc) {
+        JsonVariablesContext ctx = proc.createContext();
+        ctx.importContext(this);
+        return ctx;
     }
 }

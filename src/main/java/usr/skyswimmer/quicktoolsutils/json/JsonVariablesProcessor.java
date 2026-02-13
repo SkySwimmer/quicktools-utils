@@ -96,12 +96,7 @@ public class JsonVariablesProcessor {
      */
     public JsonElement wrapElement(JsonElement element) {
         // Unwrap if needed
-        if (element instanceof WrappedJsonElement) {
-            WrappedJsonElement elementWrapped = (WrappedJsonElement) element;
-            if (elementWrapped.getProcessor() == this)
-                return elementWrapped;
-            element = elementWrapped.unwrap();
-        }
+        element = WrappedJsonElement.unwrap(element);
 
         // Wrap objects and arrays
         if (element.isJsonObject()) {

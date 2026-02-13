@@ -52,6 +52,58 @@ public class WrappedJsonElement extends JsonElement {
         return delegate;
     }
 
+    public static boolean unwrapNeeded(JsonElement element) {
+        if (element.isJsonObject()) {
+            // Unwrap object
+            JsonObject obj = element.getAsJsonObject();
+            for (String key : obj.keySet()) {
+                JsonElement ele = obj.get(key);
+                if (unwrapNeeded(ele))
+                    return true;
+            }
+            return false;
+        } else if (element.isJsonArray()) {
+            // Unwrap array
+            JsonArray arr = element.getAsJsonArray();
+            for (JsonElement ele : arr) {
+                if (unwrapNeeded(ele))
+                    return true;
+            }
+            return false;
+        } else if (element instanceof WrappedJsonElement) {
+            // Unwrap element
+            return true;
+        }
+        return false;
+    }
+
+    public static JsonElement unwrap(JsonElement element) {
+        if (!unwrapNeeded(element))
+            return element;
+        if (element.isJsonObject()) {
+            // Unwrap object
+            JsonObject obj = element.getAsJsonObject();
+            JsonObject unwrapped = new JsonObject();
+            for (String key : obj.keySet()) {
+                JsonElement ele = obj.get(key);
+                unwrapped.add(key, unwrap(ele));
+            }
+            return unwrapped;
+        } else if (element.isJsonArray()) {
+            // Unwrap array
+            JsonArray arr = element.getAsJsonArray();
+            JsonArray unwrapped = new JsonArray();
+            for (JsonElement ele : arr) {
+                unwrapped.add(unwrap(ele));
+            }
+            return unwrapped;
+        } else if (element instanceof WrappedJsonElement) {
+            // Unwrap element
+            return ((WrappedJsonElement) element).unwrap();
+        }
+        return element;
+    }
+
     @Override
     public JsonElement deepCopy() {
         // Check type
