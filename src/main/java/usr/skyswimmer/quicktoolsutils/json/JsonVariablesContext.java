@@ -537,6 +537,10 @@ public class JsonVariablesContext implements Closeable {
      * @param context Context object to import
      */
     public void importContext(String baseKey, JsonVariablesContext context) {
+        importContext(baseKey, context, true);
+    }
+
+    private void importContext(String baseKey, JsonVariablesContext context, boolean hardBind) {
         // Prepare key
         if (baseKey.endsWith("."))
             baseKey = baseKey.substring(0, baseKey.length() - 1);
@@ -546,7 +550,8 @@ public class JsonVariablesContext implements Closeable {
                 return;
 
             // Add to target
-            context.targetContexts.add(this);
+            if (hardBind)
+                context.targetContexts.add(this);
 
             // Copy root pointers
             for (VariableContainerPointer root : context.rootContainers.values()) {
@@ -693,7 +698,8 @@ public class JsonVariablesContext implements Closeable {
             }
             if (cont != null) {
                 // Add to target
-                context.targetPointers.put(cont, this);
+                if (hardBind)
+                    context.targetPointers.put(cont, this);
 
                 // Copy root pointers
                 for (VariableContainerPointer root : context.rootContainers.values()) {
@@ -774,7 +780,7 @@ public class JsonVariablesContext implements Closeable {
      */
     public JsonVariablesContext duplicate(JsonVariablesProcessor proc) {
         JsonVariablesContext ctx = new JsonVariablesContext(proc);
-        ctx.importContext(this);
+        ctx.importContext("", this, false);
         return ctx;
     }
 
@@ -782,7 +788,7 @@ public class JsonVariablesContext implements Closeable {
     public void close() throws IOException {
         if (retain)
             return;
-        
+
         // Detach all
         for (VariableContainerPointer ptr : rootContainers.values().toArray(t -> new VariableContainerPointer[t])) {
             detachVariable(ptr);
