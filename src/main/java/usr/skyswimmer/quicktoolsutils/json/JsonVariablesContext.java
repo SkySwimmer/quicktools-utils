@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 
+import org.apache.logging.log4j.LogManager;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -159,6 +161,9 @@ public class JsonVariablesContext implements Closeable {
                 && container.parentValue.getAsJsonObject().has(container.localName))
             container.parentValue.getAsJsonObject().remove(container.localName);
 
+        // Remove context from container
+        container.container.holdingContexts.remove(this);
+
         // Go through children and remove each child variable from local context
         for (String childKey : container.container.children.keySet()) {
             VariableContainer child = container.container.children.get(childKey);
@@ -172,9 +177,6 @@ public class JsonVariablesContext implements Closeable {
                 detachVariable(pointer);
             }
         }
-
-        // Remove context from container
-        container.container.holdingContexts.remove(this);
     }
 
     /**
