@@ -104,6 +104,33 @@ public class WrappedJsonElement extends JsonElement {
         return element;
     }
 
+    public static JsonElement resolve(JsonElement element) {
+        if (!unwrapNeeded(element))
+            return element;
+        if (element.isJsonObject()) {
+            // Resolve object
+            JsonObject obj = element.getAsJsonObject();
+            JsonObject resolved = new JsonObject();
+            for (String key : obj.keySet()) {
+                JsonElement ele = obj.get(key);
+                resolved.add(key, resolve(ele));
+            }
+            return resolved;
+        } else if (element.isJsonArray()) {
+            // Resolve array
+            JsonArray arr = element.getAsJsonArray();
+            JsonArray resolved = new JsonArray();
+            for (JsonElement ele : arr) {
+                resolved.add(resolve(ele));
+            }
+            return resolved;
+        } else if (element instanceof WrappedJsonElement) {
+            // Resolve element
+            return ((WrappedJsonElement) element).resolve();
+        }
+        return element;
+    }
+
     @Override
     public JsonElement deepCopy() {
         // Check type
