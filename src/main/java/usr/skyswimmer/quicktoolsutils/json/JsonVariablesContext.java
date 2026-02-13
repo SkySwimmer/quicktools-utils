@@ -1,5 +1,7 @@
 package usr.skyswimmer.quicktoolsutils.json;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -9,7 +11,7 @@ import com.google.gson.JsonObject;
 
 import usr.skyswimmer.quicktoolsutils.json.variables.WrappedJsonElement;
 
-public class JsonVariablesContext {
+public class JsonVariablesContext implements Closeable {
 
     private static class VariableContainerPointer {
         public String localName;
@@ -21,6 +23,7 @@ public class JsonVariablesContext {
 
     private static class VariableContainer {
         public String name;
+        public VariableContainer parentContainer;
 
         public boolean wrap;
         public JsonElement baseValueElement;
@@ -61,7 +64,13 @@ public class JsonVariablesContext {
     private HashMap<VariableContainerPointer, JsonVariablesContext> targetPointers = new HashMap<VariableContainerPointer, JsonVariablesContext>();
     private ArrayList<JsonVariablesContext> targetContexts = new ArrayList<JsonVariablesContext>();
 
-    JsonVariablesContext(JsonVariablesProcessor processor) {
+    private boolean retain;
+
+    public void retain() {
+        retain = true;
+    }
+
+    public JsonVariablesContext(JsonVariablesProcessor processor) {
         this.processor = processor;
     }
 
@@ -184,6 +193,25 @@ public class JsonVariablesContext {
 
         // Remove variable
         detachVariable(cont);
+
+        // Check parent
+        if (cont.container.parentContainer != null) {
+            // Remove from parent
+            VariableContainer parentVar = cont.container.parentContainer;
+            if (parentVar.children.containsKey(cont.localName)) {
+                // Remove child entry
+                parentVar.children.remove(cont.localName);
+
+                // Detach from all attached contexts
+                for (JsonVariablesContext ctx : cont.container.holdingContexts.keySet()
+                        .toArray(t -> new JsonVariablesContext[t])) {
+                    VariableContainerPointer ptr = cont.container.holdingContexts.get(ctx);
+
+                    // Detach
+                    ctx.detachVariable(ptr);
+                }
+            }
+        }
 
         // Return
         return cont.container.resolve(processor);
@@ -349,14 +377,14 @@ public class JsonVariablesContext {
                         if (!keyParent.contains(".")) {
                             // End
                             if (!keyName.isEmpty())
-                                keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                                keyRemainer = keyName + (!keyRemainer.isEmpty() ? "." + keyRemainer : "");
                             keyName = keyParent;
                             keyParent = "";
                             ptrParent = allContainers.get(keyParent);
                             break;
                         }
                         if (!keyName.isEmpty())
-                            keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                            keyRemainer = keyName + (!keyRemainer.isEmpty() ? "." + keyRemainer : "");
                         keyName = keyParent.substring(keyParent.lastIndexOf(".") + 1);
                         keyParent = keyParent.substring(0, keyParent.lastIndexOf("."));
                         ptrParent = allContainers.get(keyParent);
@@ -373,6 +401,8 @@ public class JsonVariablesContext {
 
                         // Create variable
                         VariableContainer var = new VariableContainer();
+                        if (ptrParent != null)
+                            var.parentContainer = ptrParent.container;
                         var.baseValueElement = new JsonObject();
                         var.name = keyName;
 
@@ -420,6 +450,8 @@ public class JsonVariablesContext {
 
                                 // Create variable
                                 VariableContainer var = new VariableContainer();
+                                if (parent != null)
+                                    var.parentContainer = parent.container;
                                 var.baseValueElement = new JsonObject();
                                 var.name = part;
 
@@ -458,6 +490,8 @@ public class JsonVariablesContext {
 
                 // Create variable
                 VariableContainer var = new VariableContainer();
+                if (parent != null)
+                    var.parentContainer = parent.container;
                 var.baseValueElement = new JsonObject();
                 var.name = name;
 
@@ -546,14 +580,14 @@ public class JsonVariablesContext {
                             if (!keyParent.contains(".")) {
                                 // End
                                 if (!keyName.isEmpty())
-                                    keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                                    keyRemainer = keyName + (!keyRemainer.isEmpty() ? "." + keyRemainer : "");
                                 keyName = keyParent;
                                 keyParent = "";
                                 ptrParent = allContainers.get(keyParent);
                                 break;
                             }
                             if (!keyName.isEmpty())
-                                keyRemainer = (!keyRemainer.isEmpty() ? keyRemainer + "." : "") + keyName;
+                                keyRemainer = keyName + (!keyRemainer.isEmpty() ? "." + keyRemainer : "");
                             keyName = keyParent.substring(keyParent.lastIndexOf(".") + 1);
                             keyParent = keyParent.substring(0, keyParent.lastIndexOf("."));
                             ptrParent = allContainers.get(keyParent);
@@ -570,6 +604,8 @@ public class JsonVariablesContext {
 
                             // Create variable
                             VariableContainer var = new VariableContainer();
+                            if (ptrParent != null)
+                                var.parentContainer = ptrParent.container;
                             var.baseValueElement = new JsonObject();
                             var.name = keyName;
 
@@ -617,6 +653,8 @@ public class JsonVariablesContext {
 
                                     // Create variable
                                     VariableContainer var = new VariableContainer();
+                                    if (parent != null)
+                                        var.parentContainer = parent.container;
                                     var.baseValueElement = new JsonObject();
                                     var.name = part;
 
@@ -657,11 +695,18 @@ public class JsonVariablesContext {
 
                 // Copy root pointers
                 for (VariableContainerPointer root : context.rootContainers.values()) {
+                    // Create pointer
                     VariableContainerPointer ptr = new VariableContainerPointer();
                     ptr.container = root.container;
                     ptr.keyPath = baseKey + "." + root.keyPath;
                     ptr.localName = root.localName;
                     ptr.parentValue = cont.container.baseValueElement;
+
+                    // Add to parent
+                    if (cont != null)
+                        cont.container.children.put(root.keyPath, ptr.container);
+
+                    // Attach
                     attachVariable(ptr);
                 }
             }
@@ -707,7 +752,8 @@ public class JsonVariablesContext {
             JsonElement ele = object.get(keyPart);
 
             // Assign
-            assignVariable(baseKey, keyPart, ele, process);
+            if (!ele.isJsonObject())
+                assignVariable(baseKey, keyPart, ele, process);
 
             // Import if needed
             if (ele.isJsonObject()) {
@@ -725,8 +771,19 @@ public class JsonVariablesContext {
      * @return Duplicated JsonVariablesContext instance
      */
     public JsonVariablesContext duplicate(JsonVariablesProcessor proc) {
-        JsonVariablesContext ctx = proc.createContext();
+        JsonVariablesContext ctx = new JsonVariablesContext(proc);
         ctx.importContext(this);
         return ctx;
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (retain)
+            return;
+        
+        // Detach all
+        for (VariableContainerPointer ptr : rootContainers.values().toArray(t -> new VariableContainerPointer[t])) {
+            detachVariable(ptr);
+        }
     }
 }

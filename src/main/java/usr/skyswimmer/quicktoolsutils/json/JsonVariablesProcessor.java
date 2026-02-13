@@ -1,5 +1,7 @@
 package usr.skyswimmer.quicktoolsutils.json;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -9,23 +11,14 @@ import com.google.gson.JsonObject;
 
 import usr.skyswimmer.quicktoolsutils.json.variables.WrappedJsonElement;
 
-public class JsonVariablesProcessor {
+public class JsonVariablesProcessor implements Closeable  {
 
     private ArrayList<JsonVariablesContext> contexts = new ArrayList<JsonVariablesContext>();
     private JsonVariablesContext rootContext;
 
     public JsonVariablesProcessor() {
-        rootContext = createContext();
+        rootContext = new JsonVariablesContext(this);
         addContext(rootContext);
-    }
-
-    /**
-     * Creates a new json variables context attached to this variable processor
-     * 
-     * @return JsonVariablesContext instance
-     */
-    public JsonVariablesContext createContext() {
-        return new JsonVariablesContext(this);
     }
 
     /**
@@ -121,6 +114,15 @@ public class JsonVariablesProcessor {
 
         // Return wrapepd
         return new WrappedJsonElement(element, this);
+    }
+
+    @Override
+    public void close() throws IOException {
+        for (JsonVariablesContext ctx : getContexts()) {
+            ctx.close();
+            contexts.remove(ctx);
+        }
+        rootContext.close();
     }
 
 }
