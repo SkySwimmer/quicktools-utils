@@ -6,8 +6,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 
-import org.apache.logging.log4j.LogManager;
-
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -18,6 +16,8 @@ public class JsonVariablesContext implements Closeable {
     private static class VariableContainerPointer {
         public String localName;
         public String keyPath;
+
+        public VariableContainerPointer parent;
 
         public VariableContainer container; // Variable
         public JsonElement parentValue; // The object that holds this pointer's content
@@ -52,8 +52,9 @@ public class JsonVariablesContext implements Closeable {
             for (JsonVariablesContext ctx : holdingContexts.keySet()) {
                 VariableContainerPointer ptr = holdingContexts.get(ctx);
                 if (ptr.parentValue != null && ptr.parentValue.isJsonObject()) {
-                    ptr.parentValue.getAsJsonObject().add(name, element);
-                }
+                    ptr.parentValue.getAsJsonObject().add(name, wrap ? ctx.processor.wrapElement(element) : element);
+                } else
+                    recurseAssignTo(ptr.parent, wrap ? ctx.processor.wrapElement(element) : element, name, "");
             }
         }
     }
@@ -110,6 +111,8 @@ public class JsonVariablesContext implements Closeable {
         // Add to local parent object if needed
         if (container.parentValue != null && container.parentValue.isJsonObject())
             container.parentValue.getAsJsonObject().add(container.localName, container.container.resolve(processor));
+        else
+            recurseAssignTo(container.parent, container.container.resolve(processor), container.localName, "");
 
         // Go through children and add each child variable to local context
         for (String childKey : container.container.children.keySet()) {
@@ -124,10 +127,21 @@ public class JsonVariablesContext implements Closeable {
                 pointer.keyPath = container.keyPath + "." + child.name;
                 pointer.parentValue = container.container.baseValueElement; // Set to the parent of the current child
                                                                             // object
+                pointer.parent = container;
 
                 // Attach
                 attachVariable(pointer);
             }
+        }
+    }
+
+    private static void recurseAssignTo(VariableContainerPointer ptr, JsonElement element, String name, String prefix) {
+        if (ptr != null) {
+            if (ptr.container.baseValueElement.isJsonObject()) {
+                String key = prefix + name;
+                ptr.container.baseValueElement.getAsJsonObject().add(key, element);
+            } else
+                recurseAssignTo(ptr.parent, element, name, ptr.localName + "." + prefix);
         }
     }
 
@@ -419,6 +433,7 @@ public class JsonVariablesContext implements Closeable {
                         container.container = var;
                         container.localName = keyName;
                         container.keyPath = pthL;
+                        container.parent = ptrParent;
                         if (ptrParent != null)
                             container.parentValue = ptrParent.container.baseValueElement;
 
@@ -463,6 +478,7 @@ public class JsonVariablesContext implements Closeable {
                 container.container = var;
                 container.localName = name;
                 container.keyPath = fullKey;
+                container.parent = parent;
                 if (parent != null)
                     container.parentValue = parent.container.baseValueElement;
 
@@ -582,6 +598,7 @@ public class JsonVariablesContext implements Closeable {
                             container.container = var;
                             container.localName = keyName;
                             container.keyPath = pthL;
+                            container.parent = ptrParent;
                             if (ptrParent != null)
                                 container.parentValue = ptrParent.container.baseValueElement;
 
@@ -631,6 +648,7 @@ public class JsonVariablesContext implements Closeable {
                                     container.container = var;
                                     container.localName = part;
                                     container.keyPath = pth;
+                                    container.parent = parent;
                                     if (parent != null)
                                         container.parentValue = parent.container.baseValueElement;
 
@@ -671,6 +689,7 @@ public class JsonVariablesContext implements Closeable {
                     ptr.keyPath = baseKey + "." + root.keyPath;
                     ptr.localName = root.localName;
                     ptr.parentValue = cont.container.baseValueElement;
+                    ptr.parent = cont;
 
                     // Add to parent
                     if (cont != null)
