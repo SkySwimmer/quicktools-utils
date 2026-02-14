@@ -363,6 +363,13 @@ public class JsonVariablesContext implements Closeable {
             // Update
             ptr.container.assign(value, process);
         } else {
+            // Check base key
+            if (baseKey.isEmpty() && name.contains(".")) {
+                // Has a parent key
+                baseKey = name.substring(0, name.lastIndexOf("."));
+                name = name.substring(name.lastIndexOf(".") + 1);
+            }
+
             // Create containers
             VariableContainerPointer container = null;
             VariableContainerPointer parent = null;
@@ -433,53 +440,8 @@ public class JsonVariablesContext implements Closeable {
                     // Check remaining
                     if (!keyRemainer.isEmpty()) {
                         // Additional keys need to be made
-
-                        // Go through keys
-                        String path = parent.keyPath;
-                        for (String part : keyRemainer.split("\\.")) {
-                            // Get path
-                            String pth = path;
-                            if (!pth.isEmpty())
-                                pth += ".";
-                            pth += part;
-                            path = pth;
-
-                            // Create or get container
-                            container = null;
-                            if (!allContainers.containsKey(pth.toLowerCase())) {
-                                // Create
-                                container = new VariableContainerPointer();
-
-                                // Create variable
-                                VariableContainer var = new VariableContainer();
-                                if (parent != null)
-                                    var.parentContainer = parent.container;
-                                var.baseValueElement = new JsonObject();
-                                var.name = part;
-
-                                // Assign
-                                container.container = var;
-                                container.localName = part;
-                                container.keyPath = pth;
-                                if (parent != null)
-                                    container.parentValue = parent.container.baseValueElement;
-
-                                // Add to parent
-                                if (parent != null)
-                                    parent.container.children.put(part, var);
-
-                                // Attach
-                                attachVariable(container);
-                            } else {
-                                // Get
-                                container = allContainers.get(pth.toLowerCase());
-                                pth = container.keyPath;
-                                path = pth;
-                            }
-
-                            // Update parent
-                            parent = container;
-                        }
+                        // Update name
+                        name = keyRemainer + "." + name;
                     }
                 }
             }
