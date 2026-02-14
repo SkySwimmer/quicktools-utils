@@ -176,25 +176,26 @@ public class WrappedJsonElement extends JsonElement {
             }
         }
 
-        // Check
+        // Parse
         boolean updated = false;
-        String pthIndex = pth;
-        String pathStart = pth;
-        while (pathStart.contains("{")) {
-            // Parse key and substring
-            int start = pthIndex.indexOf("{");
-            int start2 = pathStart.indexOf("{");
-            String key = pth.substring(start);
-            String prefix = pth.substring(0, start);
+        String output = "";
+        String pthInput = pth;
+        while (pthInput.contains("{")) {
+            // Substrings
+            int start = pthInput.indexOf("{");
+            String key = pthInput.substring(start);
+            String prefix = pthInput.substring(0, start);
             if (!key.contains("}"))
                 break;
-            String suffix = key.substring(key.indexOf("}") + 1);
-            pathStart = pathStart.substring(start2 + 1);
-            pathStart = pathStart.substring(pathStart.indexOf("}") + 1);
+            pthInput = pthInput.substring(start + 1);
+            pthInput = pthInput.substring(pthInput.indexOf("}") + 1);
             key = key.substring(1, key.indexOf("}"));
+            
+            // Add prefix to output
+            output += prefix;
 
             // Prepare value
-            String value = "";
+            String value = "{" + key + "}";
 
             // Resolve
             JsonElement resolved = processor.resolveVariable(key);
@@ -211,18 +212,16 @@ public class WrappedJsonElement extends JsonElement {
                     value = resolved.getAsString();
                 else
                     value = resolved.toString();
-
-                // Update
-                pth = prefix + value + suffix;
+                updated = true;
             }
 
-            // Fake
-            String valStripped = "#" + key + "#";
-
-            // Update index
-            pthIndex = prefix + valStripped + suffix;
-            updated = true;
+            // Write value
+            output += value;
         }
+        if (!pthInput.isEmpty())
+            output += pthInput;
+        if (updated)
+            pth = output;
 
         // Return
         if (updated)
