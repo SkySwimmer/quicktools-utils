@@ -3,6 +3,7 @@ package usr.skyswimmer.quicktoolsutils.json;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 
@@ -12,12 +13,14 @@ import com.google.gson.JsonObject;
 import usr.skyswimmer.quicktoolsutils.json.variables.WrappedJsonElement;
 
 public class JsonVariablesContext implements Closeable {
+    private static ArrayList<JsonVariablesContext> boundContainers = new ArrayList<JsonVariablesContext>();
 
     private static class VariableContainerPointer {
         public String localName;
         public String keyPath;
 
         public VariableContainerPointer parent;
+        public JsonVariablesContext boundToContext;
 
         public VariableContainer container; // Variable
         public JsonElement parentValue; // The object that holds this pointer's content
@@ -61,11 +64,23 @@ public class JsonVariablesContext implements Closeable {
 
     JsonVariablesProcessor processor;
 
+    // Development helper, so devs can analyze which ones are sticking
+    private StackTraceElement[] createdByStack;
+    private JsonVariablesContext duplicateOf;
+
     private HashMap<String, VariableContainerPointer> allContainers = new LinkedHashMap<String, VariableContainerPointer>();
     private HashMap<String, VariableContainerPointer> rootContainers = new LinkedHashMap<String, VariableContainerPointer>();
 
     private HashMap<VariableContainerPointer, JsonVariablesContext> targetPointers = new HashMap<VariableContainerPointer, JsonVariablesContext>();
     private ArrayList<JsonVariablesContext> targetContexts = new ArrayList<JsonVariablesContext>();
+
+    private ArrayList<JsonVariablesContext> importedContexts = new ArrayList<JsonVariablesContext>();
+    private ArrayList<JsonVariablesContext> importedIntoTargetContexts = new ArrayList<JsonVariablesContext>();
+    private boolean wasAddedToProcessor;
+
+    void addToProcessor() {
+        wasAddedToProcessor = true;
+    }
 
     private boolean retain;
 
@@ -73,8 +88,17 @@ public class JsonVariablesContext implements Closeable {
         retain = true;
     }
 
+    public void wipeRetain() {
+        retain = false;
+    }
+
     public JsonVariablesContext(JsonVariablesProcessor processor) {
         this.processor = processor;
+        synchronized (boundContainers) {
+            boundContainers.add(this);
+        }
+        createdByStack = Thread.currentThread().getStackTrace();
+        createdByStack = Arrays.copyOfRange(createdByStack, 2, createdByStack.length);
     }
 
     private void attachVariable(VariableContainerPointer container) {
@@ -102,6 +126,42 @@ public class JsonVariablesContext implements Closeable {
                 ptr2.localName = container.localName;
                 ptr2.parentValue = ptr.container.baseValueElement;
                 ctx.attachVariable(ptr2);
+            }
+        }
+
+        // Go through parent holding contexts
+        if (container.parent != null) {
+            // Add to parents lacking the container
+            for (JsonVariablesContext ctx : container.parent.container.holdingContexts.keySet()) {
+                VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
+                String pathLocal = ptr.keyPath + "." + container.localName;
+
+                // Check absent
+                if (!ctx.hasVariable(pathLocal)) {
+                    // Create
+                    VariableContainerPointer ptr2 = new VariableContainerPointer();
+                    ptr2.container = container.container;
+                    ptr2.keyPath = pathLocal;
+                    ptr2.localName = container.localName;
+                    ptr2.parentValue = ptr.container.baseValueElement;
+                    ctx.attachVariable(ptr2);
+                }
+            }
+
+            // Add to parent context if needed
+            if (container.parent.boundToContext != null) {
+                JsonVariablesContext ctx = container.parent.boundToContext;
+                String pathLocal = container.localName;
+
+                // Check absent
+                if (!ctx.hasVariable(pathLocal)) {
+                    // Create
+                    VariableContainerPointer ptr2 = new VariableContainerPointer();
+                    ptr2.container = container.container;
+                    ptr2.keyPath = pathLocal;
+                    ptr2.localName = container.localName;
+                    ctx.attachVariable(ptr2);
+                }
             }
         }
 
@@ -178,6 +238,30 @@ public class JsonVariablesContext implements Closeable {
         // Remove context from container
         container.container.holdingContexts.remove(this);
 
+        // Remove the container from the bound context
+        if (container.boundToContext != null) {
+            // Removed bound
+            JsonVariablesContext ctx = container.boundToContext;
+
+            // Remove from target
+            ctx.importedIntoTargetContexts.remove(this);
+
+            // Check bind status
+            if (!ctx.wasAddedToProcessor) {
+                // Check
+                int left = ctx.importedIntoTargetContexts.size();
+                if (left == 0) {
+                    // Nothing is using this context anymore
+
+                    // Delete it
+                    try {
+                        ctx.close();
+                    } catch (IOException e) {
+                    }
+                }
+            }
+        }
+
         // Go through children and remove each child variable from local context
         for (String childKey : container.container.children.keySet()) {
             VariableContainer child = container.container.children.get(childKey);
@@ -189,6 +273,35 @@ public class JsonVariablesContext implements Closeable {
 
                 // Remove child variable
                 detachVariable(pointer);
+            }
+        }
+
+        // Go through parent holding contexts
+        if (container.parent != null) {
+            // Remove from parents holding the container
+            for (JsonVariablesContext ctx : container.parent.container.holdingContexts.keySet()) {
+                VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
+                String pathLocal = ptr.keyPath + "." + container.localName;
+
+                // Check absent
+                if (ctx.hasVariable(pathLocal)) {
+                    // Remove
+                    VariableContainerPointer ptr2 = ctx.allContainers.get(pathLocal.toLowerCase());
+                    ctx.detachVariable(ptr2);
+                }
+            }
+
+            // Remove from parent context if needed
+            if (container.parent.boundToContext != null) {
+                JsonVariablesContext ctx = container.parent.boundToContext;
+                String pathLocal = container.localName;
+
+                // Check absent
+                if (ctx.hasVariable(pathLocal)) {
+                    // Remove
+                    VariableContainerPointer ptr2 = ctx.allContainers.get(pathLocal.toLowerCase());
+                    ctx.detachVariable(ptr2);
+                }
             }
         }
     }
@@ -681,6 +794,9 @@ public class JsonVariablesContext implements Closeable {
                 if (hardBind)
                     context.targetPointers.put(cont, this);
 
+                // Mark target as bound to this context
+                cont.boundToContext = context;
+
                 // Copy root pointers
                 for (VariableContainerPointer root : context.rootContainers.values()) {
                     // Create pointer
@@ -700,6 +816,10 @@ public class JsonVariablesContext implements Closeable {
                 }
             }
         }
+
+        // Add
+        importedContexts.add(context);
+        context.importedIntoTargetContexts.add(this);
     }
 
     /**
@@ -762,6 +882,7 @@ public class JsonVariablesContext implements Closeable {
     public JsonVariablesContext duplicate(JsonVariablesProcessor proc) {
         JsonVariablesContext ctx = new JsonVariablesContext(proc);
         ctx.importContext("", this, false);
+        ctx.duplicateOf = this;
         return ctx;
     }
 
@@ -774,5 +895,57 @@ public class JsonVariablesContext implements Closeable {
         for (VariableContainerPointer ptr : rootContainers.values().toArray(t -> new VariableContainerPointer[t])) {
             detachVariable(ptr);
         }
+
+        // Remove
+        synchronized (boundContainers) {
+            boundContainers.remove(this);
+        }
+
+        // Check bound contexts
+        if (importedIntoTargetContexts.size() != 0) {
+            // Remove from bound contexts
+            for (JsonVariablesContext parent : importedIntoTargetContexts.toArray(t -> new JsonVariablesContext[t])) {
+                // Remove from parent
+                parent.importedContexts.remove(this);
+
+                // Remove
+                importedIntoTargetContexts.remove(parent);
+            }
+        }
+
+        // Check contexts
+        if (importedContexts.size() != 0) {
+            // Has imported contexts that might also need closing
+            for (JsonVariablesContext ctx : importedContexts.toArray(t -> new JsonVariablesContext[t])) {
+                // Remove from target
+                ctx.importedIntoTargetContexts.remove(this);
+
+                // Skip if needed
+                if (ctx.wasAddedToProcessor)
+                    continue;
+
+                // Check
+                int left = ctx.importedIntoTargetContexts.size();
+                if (left == 0) {
+                    // Nothing is using this context anymore
+
+                    // Delete it
+                    ctx.close();
+                }
+            }
+        }
+    }
+
+    /**
+     * Retrieves all known contexts, useful for finding memory leaks
+     */
+    public static JsonVariablesContext[] getAllContexts() {
+        synchronized (boundContainers) {
+            return boundContainers.toArray(t -> new JsonVariablesContext[t]);
+        }
+    }
+
+    public StackTraceElement[] getContextCreattionStack() {
+        return createdByStack;
     }
 }

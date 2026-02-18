@@ -1,6 +1,5 @@
 package usr.skyswimmer.quicktoolsutils.json;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,7 +10,7 @@ import com.google.gson.JsonObject;
 
 import usr.skyswimmer.quicktoolsutils.json.variables.WrappedJsonElement;
 
-public class JsonVariablesProcessor implements Closeable  {
+public class JsonVariablesProcessor implements AutoCloseable {
 
     private ArrayList<JsonVariablesContext> contexts = new ArrayList<JsonVariablesContext>();
     private JsonVariablesContext rootContext;
@@ -32,6 +31,7 @@ public class JsonVariablesProcessor implements Closeable  {
         if (contexts.contains(ctx))
             return;
         contexts.add(ctx);
+        ctx.addToProcessor();
     }
 
     /**
