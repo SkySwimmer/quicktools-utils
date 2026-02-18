@@ -135,18 +135,20 @@ public class JsonVariablesContext implements Closeable {
             JsonVariablesContext[] ks = container.parent.container.holdingContexts.keySet()
                     .toArray(t -> new JsonVariablesContext[t]);
             for (JsonVariablesContext ctx : ks) {
-                VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
-                String pathLocal = ptr.keyPath + "." + container.localName;
+                if (container.parent.container.holdingContexts.containsKey(ctx)) {
+                    VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
+                    String pathLocal = ptr.keyPath + "." + container.localName;
 
-                // Check absent
-                if (!ctx.hasVariable(pathLocal)) {
-                    // Create
-                    VariableContainerPointer ptr2 = new VariableContainerPointer();
-                    ptr2.container = container.container;
-                    ptr2.keyPath = pathLocal;
-                    ptr2.localName = container.localName;
-                    ptr2.parentValue = ptr.container.baseValueElement;
-                    ctx.attachVariable(ptr2);
+                    // Check absent
+                    if (!ctx.hasVariable(pathLocal)) {
+                        // Create
+                        VariableContainerPointer ptr2 = new VariableContainerPointer();
+                        ptr2.container = container.container;
+                        ptr2.keyPath = pathLocal;
+                        ptr2.localName = container.localName;
+                        ptr2.parentValue = ptr.container.baseValueElement;
+                        ctx.attachVariable(ptr2);
+                    }
                 }
             }
 
@@ -284,14 +286,16 @@ public class JsonVariablesContext implements Closeable {
             JsonVariablesContext[] ks = container.parent.container.holdingContexts.keySet()
                     .toArray(t -> new JsonVariablesContext[t]);
             for (JsonVariablesContext ctx : ks) {
-                VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
-                String pathLocal = ptr.keyPath + "." + container.localName;
+                if (container.parent.container.holdingContexts.containsKey(ctx)) {
+                    VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
+                    String pathLocal = ptr.keyPath + "." + container.localName;
 
-                // Check absent
-                if (ctx.hasVariable(pathLocal)) {
-                    // Remove
-                    VariableContainerPointer ptr2 = ctx.allContainers.get(pathLocal.toLowerCase());
-                    ctx.detachVariable(ptr2);
+                    // Check absent
+                    if (ctx.hasVariable(pathLocal)) {
+                        // Remove
+                        VariableContainerPointer ptr2 = ctx.allContainers.get(pathLocal.toLowerCase());
+                        ctx.detachVariable(ptr2);
+                    }
                 }
             }
 
