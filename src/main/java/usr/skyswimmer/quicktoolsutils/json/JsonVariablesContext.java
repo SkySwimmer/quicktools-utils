@@ -132,7 +132,9 @@ public class JsonVariablesContext implements Closeable {
         // Go through parent holding contexts
         if (container.parent != null) {
             // Add to parents lacking the container
-            for (JsonVariablesContext ctx : container.parent.container.holdingContexts.keySet()) {
+            JsonVariablesContext[] ks = container.parent.container.holdingContexts.keySet()
+                    .toArray(t -> new JsonVariablesContext[t]);
+            for (JsonVariablesContext ctx : ks) {
                 VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
                 String pathLocal = ptr.keyPath + "." + container.localName;
 
@@ -279,7 +281,9 @@ public class JsonVariablesContext implements Closeable {
         // Go through parent holding contexts
         if (container.parent != null) {
             // Remove from parents holding the container
-            for (JsonVariablesContext ctx : container.parent.container.holdingContexts.keySet()) {
+            JsonVariablesContext[] ks = container.parent.container.holdingContexts.keySet()
+                    .toArray(t -> new JsonVariablesContext[t]);
+            for (JsonVariablesContext ctx : ks) {
                 VariableContainerPointer ptr = container.parent.container.holdingContexts.get(ctx);
                 String pathLocal = ptr.keyPath + "." + container.localName;
 
@@ -916,7 +920,8 @@ public class JsonVariablesContext implements Closeable {
         // Check contexts
         if (importedContexts.size() != 0) {
             // Has imported contexts that might also need closing
-            for (JsonVariablesContext ctx : importedContexts.toArray(t -> new JsonVariablesContext[t])) {
+            JsonVariablesContext[] ctxs = importedContexts.toArray(t -> new JsonVariablesContext[t]);
+            for (JsonVariablesContext ctx : ctxs) {
                 // Remove from target
                 ctx.importedIntoTargetContexts.remove(this);
 
