@@ -190,7 +190,7 @@ public class JsonUtils {
 		for (String key : source.keySet()) {
 			if (source.get(key).isJsonObject()) {
 				JsonObject chT = createOrGetJsonObject(target, key);
-				mergeObject(source.get(key).getAsJsonObject(), chT);
+				mergeObject(source.get(key).getAsJsonObject(), chT, doMergeArray);
 			} else if (source.get(key).isJsonArray()) {
 				JsonArray chT = createOrGetJsonArray(target, key);
 				if (doMergeArray)
